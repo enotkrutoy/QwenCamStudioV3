@@ -1,3 +1,4 @@
+
 import React, { useEffect, useRef, useMemo } from 'react';
 import * as THREE from 'three';
 import { CameraControlState, ImageData, CameraPreset } from '../types';
@@ -48,6 +49,12 @@ export const Camera3DControl: React.FC<Props> = ({ state, sourceImage, onChange,
     renderer.setSize(width, height);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    
+    // Ensure the canvas fills the container correctly via CSS to avoid layout loops
+    renderer.domElement.style.width = '100%';
+    renderer.domElement.style.height = '100%';
+    renderer.domElement.style.display = 'block';
+    
     containerRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
@@ -162,10 +169,20 @@ export const Camera3DControl: React.FC<Props> = ({ state, sourceImage, onChange,
 
     const resizeObserver = new ResizeObserver(entries => {
       if (!entries[0] || !cameraRef.current || !rendererRef.current) return;
-      const { width, height } = entries[0].contentRect;
-      cameraRef.current.aspect = width / height;
-      cameraRef.current.updateProjectionMatrix();
-      rendererRef.current.setSize(width, height);
+      
+      // Use requestAnimationFrame to avoid "ResizeObserver loop limit exceeded" notification
+      // This schedules the layout change for the next frame.
+      window.requestAnimationFrame(() => {
+        if (!entries[0] || !cameraRef.current || !rendererRef.current || !containerRef.current) return;
+        const { width, height } = entries[0].contentRect;
+        
+        cameraRef.current.aspect = width / height;
+        cameraRef.current.updateProjectionMatrix();
+        
+        // Pass 'false' for the third argument to avoid setting the canvas style 
+        // to fixed pixel values, which can trigger a ResizeObserver loop.
+        rendererRef.current.setSize(width, height, false);
+      });
     });
     resizeObserver.observe(containerRef.current);
 
@@ -198,7 +215,7 @@ export const Camera3DControl: React.FC<Props> = ({ state, sourceImage, onChange,
       if (frustumCam) {
         frustumCam.fov = state.wideAngle ? 95 : 45;
         frustumCam.updateProjectionMatrix();
-        // Update helper if it exists as the second child
+        // Update helper if it exists
         const helper = modelCameraRef.current.children.find(c => c instanceof THREE.CameraHelper);
         if (helper) (helper as THREE.CameraHelper).update();
       }

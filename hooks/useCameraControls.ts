@@ -1,3 +1,4 @@
+
 import { useState, useCallback, useMemo } from 'react';
 import { CameraControlState } from '../types';
 import { DEFAULT_CAMERA_STATE } from '../constants';
@@ -10,11 +11,10 @@ export const useCameraControls = () => {
   const updateState = useCallback((updates: Partial<CameraControlState>) => {
     setState(prev => {
       const newState = { ...prev, ...updates };
-      // Only save to history if something actually changed and it's not a tiny jitter
       const hasChanged = Object.entries(updates).some(([key, value]) => (prev as any)[key] !== value);
       
       if (hasChanged) {
-        setPast(p => [...p, prev].slice(-50)); // Limit history to 50 steps
+        setPast(p => [...p, prev].slice(-50));
         setFuture([]);
       }
       return newState;
@@ -49,37 +49,32 @@ export const useCameraControls = () => {
 
   const buildCameraPrompt = useCallback((s: CameraControlState): string => {
     const segments: string[] = [];
+    
+    // Глобальная установка на сохранение объектов
+    segments.push("STRICT_COMPOSITION: Keep all visible props and held objects in frame.");
 
     if (s.floating) {
-      segments.push("PHYSICS_OVERRIDE: Enable zero-gravity for primary subject. Position: 50cm vertical offset from ground plane. Render high-fidelity ambient occlusion (AO) and soft contact shadows on the floor. No visible supports.");
-    } else if (s.rotate === 0 && s.forward === 0 && s.tilt === 0 && !s.wideAngle) {
-      return "no camera movement";
+      segments.push("PHYSICS_OVERRIDE: Floating subject. 50cm offset. Maintain props integrity.");
     }
 
     if (s.rotate !== 0) {
       const direction = s.rotate > 0 ? "clockwise" : "counter-clockwise";
-      segments.push(`ORBIT_TRANSFORM: Pivot camera ${Math.abs(s.rotate)} degrees ${direction} around the center of interest. Recalculate global illumination for new azimuth.`);
+      segments.push(`ORBIT_TRANSFORM: Pivot ${Math.abs(s.rotate)} deg ${direction}. Keep subject and held items centered.`);
     }
 
-    if (s.forward > 5) {
-      segments.push("DOLLY_IN: Move camera to extreme close-up (macro range). Increase depth of field (DoF) blur on background.");
-    } else if (s.forward > 2) {
-      segments.push("DOLLY_IN: Advance camera to medium-shot range. Tighten perspective lines.");
+    if (s.forward > 0) {
+      segments.push(`DOLLY_ZOOM: Magnification level ${s.forward}. Ensure held items remain fully visible and in focus.`);
     }
 
-    if (s.tilt > 0.4) {
-      segments.push("PITCH_TRANSFORM: High-angle 'God view' perspective looking down 45 degrees. Compress vertical subject data.");
-    } else if (s.tilt < -0.4) {
-      segments.push("PITCH_TRANSFORM: Low-angle 'Hero shot' perspective looking up. Exaggerate subject height and grandeur.");
+    if (Math.abs(s.tilt) > 0.1) {
+      segments.push(`PITCH_AXIS: Angle ${s.tilt}. Adjust perspective for subject and all interactive elements.`);
     }
 
     if (s.wideAngle) {
-      segments.push("OPTICS_PROFILE: 14mm Ultra-wide lens. Apply subtle radial barrel distortion. Enhance peripheral environment detail and stretch vanishing points.");
-    } else {
-      segments.push("OPTICS_PROFILE: 50mm Prime lens. Natural perspective, zero distortion, human-eye field of view.");
+      segments.push("LENS_PROFILE: 14mm. Expand field of view to capture more of the environment and subject details.");
     }
 
-    return segments.join(" ");
+    return segments.length > 1 ? segments.join(" ") : "no camera movement (identity and scene restoration mode)";
   }, []);
 
   const generatedPrompt = useMemo(() => buildCameraPrompt(state), [state, buildCameraPrompt]);

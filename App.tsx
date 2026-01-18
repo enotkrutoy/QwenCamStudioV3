@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { GenerationSettings, ImageData, GenerationResult, CameraPreset } from './types';
 import { DEFAULT_SETTINGS } from './constants';
 import { useCameraControls } from './hooks/useCameraControls';
@@ -37,14 +37,11 @@ const App: React.FC = () => {
   const [result, setResult] = useState<GenerationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   
-  // Adaptive UI State
   const [activeView, setActiveView] = useState<'control' | 'result'>('control');
   const [activeTab, setActiveTab] = useState<'3d' | 'sliders'>('3d');
   const [activePreset, setActivePreset] = useState<CameraPreset | undefined>('default');
   const [apiKeyReady, setApiKeyReady] = useState<boolean | null>(null);
-  
   const [isZoomed, setIsZoomed] = useState(false);
-  const [copyStatus, setCopyStatus] = useState<'idle' | 'success'>('idle');
 
   useEffect(() => {
     const checkKey = async () => {
@@ -61,67 +58,22 @@ const App: React.FC = () => {
   const handleSelectKey = async () => {
     if (window.aistudio?.openSelectKey) {
       await window.aistudio.openSelectKey();
+      // Assume success as per instructions
       setApiKeyReady(true);
     }
   };
 
-  const copyImageToClipboard = async (url: string) => {
-    try {
-      const response = await fetch(url);
-      const blob = await response.blob();
-      const item = new ClipboardItem({ [blob.type]: blob });
-      await navigator.clipboard.write([item]);
-      setCopyStatus('success');
-      setTimeout(() => setCopyStatus('idle'), 2000);
-    } catch (err) {
-      setError("Clipboard access denied. Try downloading the image instead.");
-    }
-  };
-
-  const downloadImage = (url: string) => {
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `qwencam-v3-${Date.now()}.png`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const shareImage = async (url: string) => {
-    if (navigator.share) {
-      try {
-        const response = await fetch(url);
-        const blob = await response.blob();
-        const file = new File([blob], "reconstruction.png", { type: blob.type });
-        await navigator.share({
-          files: [file],
-          title: 'QwenCam Reconstruction',
-          text: 'AI-generated spatial perspective reconstruction.',
-        });
-      } catch (err) {
-        if ((err as Error).name !== 'AbortError') {
-          setError("Mobile sharing failed. Using clipboard fallback.");
-          copyImageToClipboard(url);
-        }
-      }
-    } else {
-      copyImageToClipboard(url);
-    }
-  };
-
-  const startGenerationFlow = async () => {
+  const startGenerationFlow = useCallback(async () => {
     if (!sourceImage) return;
-    if (settings.quality === 'pro' && !apiKeyReady) {
-      await handleSelectKey();
-      return;
-    }
-
+    
     setIsGenerating(true);
     setError(null);
+
     try {
       const { imageUrl, groundingChunks } = await geminiService.generateImage(sourceImage, generatedPrompt, settings);
+      
       const newResult: GenerationResult = {
-        id: Math.random().toString(36).substring(7),
+        id: crypto.randomUUID(),
         imageUrl,
         prompt: generatedPrompt,
         timestamp: Date.now(),
@@ -129,32 +81,35 @@ const App: React.FC = () => {
         cameraState: { ...cameraState },
         groundingChunks,
       };
+
       setResult(newResult);
       setHistory(prev => [newResult, ...prev]);
-      // Intelligent view switching on mobile
+      
+      // Auto-switch to result on mobile
       if (window.innerWidth < 1024) setActiveView('result');
     } catch (err: any) {
       if (err.message?.includes("Requested entity was not found.")) {
-        setError("SYSTEM_FAULT: Invalid API Key project. Use a paid project in AI Studio.");
+        setError("Invalid project or key. Please re-select a paid API key.");
         setApiKeyReady(false);
+        handleSelectKey();
       } else {
-        setError(err.message || "Spatial reconstruction fault.");
+        setError(err.message || "Engine Error: Perspective reconstruction failed.");
       }
     } finally {
       setIsGenerating(false);
     }
-  };
+  }, [sourceImage, generatedPrompt, settings, cameraState]);
 
   return (
-    <div className="min-h-screen bg-[#050505] text-white flex flex-col font-sans selection:bg-orange-500/30 overflow-x-hidden">
-      {/* Dynamic Header */}
-      <header className="h-16 flex items-center justify-between px-6 lg:px-10 border-b border-white/5 bg-black/40 backdrop-blur-xl sticky top-0 z-[100]">
+    <div className="min-h-screen bg-[#050505] text-white flex flex-col font-sans selection:bg-orange-500/30 overflow-hidden">
+      {/* Universal Header */}
+      <header className="h-16 flex items-center justify-between px-6 lg:px-10 border-b border-white/5 bg-black/40 backdrop-blur-xl shrink-0 z-50">
         <div className="flex items-center gap-4">
           <div className="w-8 h-8 bg-orange-600 rounded-xl flex items-center justify-center font-black text-xs shadow-lg shadow-orange-600/30">QC</div>
           <h1 className="text-sm font-black uppercase tracking-[0.3em] hidden sm:block">QwenCam <span className="text-orange-500">V3</span></h1>
         </div>
         
-        <div className="flex gap-6 lg:gap-10">
+        <div className="flex gap-8">
           <button 
             onClick={() => setActiveTab('3d')}
             className={`text-[10px] font-black uppercase tracking-[0.2em] pb-1 border-b-2 transition-all ${activeTab === '3d' ? 'border-orange-500 text-orange-500' : 'border-transparent text-gray-500 hover:text-gray-300'}`}
@@ -165,133 +120,83 @@ const App: React.FC = () => {
             onClick={() => setActiveTab('sliders')}
             className={`text-[10px] font-black uppercase tracking-[0.2em] pb-1 border-b-2 transition-all ${activeTab === 'sliders' ? 'border-orange-500 text-orange-500' : 'border-transparent text-gray-500 hover:text-gray-300'}`}
           >
-            Axis Logic
+            Axis Settings
           </button>
         </div>
 
         <div className="flex items-center gap-4">
-          {settings.quality === 'pro' && !apiKeyReady ? (
-            <button onClick={handleSelectKey} className="text-[9px] bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-full font-black uppercase tracking-widest shadow-lg shadow-blue-600/20 transition-all active:scale-90">
-              Unlock Pro
+          {!apiKeyReady && (
+            <button onClick={handleSelectKey} className="text-[9px] bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-full font-black uppercase tracking-widest shadow-lg shadow-blue-600/20 transition-all">
+              Authorize AI
             </button>
-          ) : (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-white/5">
-              <div className="w-1.5 h-1.5 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
-              <span className="text-[9px] font-black uppercase text-gray-400">System Ready</span>
-            </div>
           )}
+          <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-white/5">
+            <div className={`w-1.5 h-1.5 rounded-full ${apiKeyReady ? 'bg-green-500' : 'bg-yellow-500'} animate-pulse`} />
+            <span className="text-[9px] font-black uppercase text-gray-400">Node Status</span>
+          </div>
         </div>
       </header>
 
-      {/* Main Workspace */}
-      <main className="flex-1 flex flex-col lg:grid lg:grid-cols-[1fr_420px] lg:h-[calc(100vh-64px)] overflow-hidden">
+      {/* Main Adaptive Layout */}
+      <main className="flex-1 flex flex-col lg:grid lg:grid-cols-[1fr_450px] overflow-hidden">
         
-        {/* Interaction Canvas */}
-        <section className={`flex-1 flex flex-col p-4 lg:p-10 gap-8 overflow-y-auto custom-scrollbar transition-opacity duration-300 ${activeView === 'result' ? 'hidden lg:flex' : 'flex opacity-100'}`}>
-          <div className="relative aspect-[16/10] lg:aspect-auto lg:flex-1 min-h-[450px] bg-black rounded-[3rem] overflow-hidden shadow-2xl border border-white/5 group">
+        {/* Interaction Stage */}
+        <section className={`flex-1 flex flex-col p-4 lg:p-10 gap-6 overflow-y-auto ${activeView === 'result' ? 'hidden lg:flex' : 'flex'}`}>
+          <div className="relative flex-1 min-h-[400px] bg-black rounded-[3rem] overflow-hidden border border-white/5 shadow-2xl">
             {activeTab === '3d' ? (
               <Camera3DControl state={cameraState} sourceImage={sourceImage} onChange={updateCamera} activePreset={activePreset} />
             ) : (
-              <div className="p-10 h-full overflow-y-auto">
+              <div className="p-8 h-full overflow-y-auto scrollbar-hide">
                 <CameraSliders state={cameraState} onChange={updateCamera} onReset={resetCamera} />
               </div>
             )}
             {!sourceImage && (
               <div className="absolute inset-0 z-50 flex items-center justify-center bg-[#050505]/95 backdrop-blur-3xl p-6">
-                <div className="w-full max-w-md scale-up-center"><ImageUploader onUpload={setSourceImage} /></div>
+                <div className="w-full max-w-md animate-in fade-in zoom-in duration-500">
+                  <ImageUploader onUpload={setSourceImage} />
+                </div>
               </div>
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-6 h-20">
-            <button onClick={resetCamera} className="bg-white/5 border border-white/5 rounded-3xl text-[11px] font-black uppercase tracking-[0.3em] hover:bg-white/10 transition-all active:scale-95 group flex items-center justify-center gap-3">
-              <span className="group-hover:rotate-180 transition-transform duration-700 opacity-50">↺</span>
-              Reset Angle
+          <div className="grid grid-cols-2 gap-4 h-16 lg:h-20">
+            <button onClick={resetCamera} className="bg-white/5 border border-white/5 rounded-3xl text-[10px] font-black uppercase tracking-widest hover:bg-white/10 transition-all active:scale-95">
+              Reset View
             </button>
             <button 
               onClick={startGenerationFlow}
               disabled={!sourceImage || isGenerating}
-              className={`rounded-3xl text-[11px] font-black uppercase tracking-[0.3em] transition-all shadow-2xl active:scale-95 flex items-center justify-center gap-3 ${(!sourceImage || isGenerating) ? 'bg-gray-800 text-gray-600 cursor-not-allowed' : 'bg-orange-600 text-white hover:bg-orange-500 hover:shadow-orange-600/30'}`}
+              className={`rounded-3xl text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 ${(!sourceImage || isGenerating) ? 'bg-gray-800 text-gray-600' : 'bg-orange-600 text-white hover:bg-orange-500'}`}
             >
-              {isGenerating ? (
-                <>
-                  <div className="w-3 h-3 border-2 border-white/20 border-t-white rounded-full animate-spin" />
-                  Generating...
-                </>
-              ) : (
-                <>
-                  <span className="animate-pulse">⚡</span>
-                  Reconstruct
-                </>
-              )}
+              {isGenerating ? 'Computing...' : 'Reconstruct Frame'}
             </button>
           </div>
 
-          <div className="hidden lg:block h-32"><PromptConsole prompt={generatedPrompt} /></div>
+          <div className="hidden lg:block h-32 shrink-0"><PromptConsole prompt={generatedPrompt} /></div>
         </section>
 
-        {/* Global Result Panel */}
-        <aside className={`w-full lg:w-[420px] border-l border-white/5 bg-[#080808]/50 backdrop-blur-md flex flex-col p-4 lg:p-10 gap-10 overflow-y-auto custom-scrollbar transition-transform duration-500 ${activeView === 'control' ? 'hidden lg:flex' : 'flex translate-x-0'}`}>
+        {/* Global Output Sidebar */}
+        <aside className={`w-full lg:w-[450px] border-l border-white/5 bg-[#080808]/80 backdrop-blur-xl flex flex-col p-6 lg:p-10 gap-8 overflow-y-auto scrollbar-hide ${activeView === 'control' ? 'hidden lg:flex' : 'flex'}`}>
           <div className="space-y-4">
-            <div className="flex justify-between items-center px-2">
-              <h2 className="text-[10px] font-black uppercase tracking-[0.3em] text-gray-500">Output Frame</h2>
-              {result && (
-                 <span className="text-[8px] font-bold text-orange-500/60 font-mono tracking-widest">RES: 1024x1024</span>
-              )}
-            </div>
-            <div className="relative aspect-square rounded-[3rem] bg-black border border-white/10 overflow-hidden shadow-[0_0_80px_rgba(0,0,0,0.5)] flex items-center justify-center group/img">
+            <h2 className="text-[10px] font-black uppercase tracking-[0.3em] text-gray-500 px-2">Processed Output</h2>
+            <div className="relative aspect-square rounded-[2.5rem] bg-black border border-white/10 overflow-hidden group">
               {result ? (
-                <>
-                  <img 
-                    src={result.imageUrl} 
-                    className="w-full h-full object-cover cursor-zoom-in transition-transform duration-1000 group-hover/img:scale-110" 
-                    alt="Resulting Perspective" 
-                    onClick={() => setIsZoomed(true)} 
-                  />
-                  
-                  {/* Floating Action Bar - Mobile Friendly */}
-                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center gap-4">
-                    <button 
-                      onClick={() => downloadImage(result.imageUrl)} 
-                      className="w-14 h-14 bg-black/80 backdrop-blur-2xl rounded-2xl flex items-center justify-center border border-white/10 hover:bg-orange-600 hover:scale-110 transition-all shadow-2xl active:scale-90"
-                      title="Download Reconstruction"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                    </button>
-                    <button 
-                      onClick={() => setIsZoomed(true)} 
-                      className="w-14 h-14 bg-black/80 backdrop-blur-2xl rounded-2xl flex items-center justify-center border border-white/10 hover:bg-orange-600 hover:scale-110 transition-all shadow-2xl active:scale-90"
-                      title="Fullscreen Zoom"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
-                    </button>
-                    <button 
-                      onClick={() => shareImage(result.imageUrl)} 
-                      className="w-14 h-14 bg-black/80 backdrop-blur-2xl rounded-2xl flex items-center justify-center border border-white/10 hover:bg-orange-600 hover:scale-110 transition-all shadow-2xl active:scale-90 lg:hidden"
-                      title="Share / Save"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
-                    </button>
-                  </div>
-                </>
+                <img 
+                  src={result.imageUrl} 
+                  className="w-full h-full object-cover cursor-zoom-in group-hover:scale-110 transition-transform duration-1000" 
+                  alt="AI Reconstruction" 
+                  onClick={() => setIsZoomed(true)} 
+                />
               ) : (
-                <div className="flex flex-col items-center gap-6 opacity-20">
-                  <div className="w-20 h-20 border-2 border-dashed border-gray-600 rounded-full flex items-center justify-center">
-                    <div className="w-10 h-10 bg-gray-600/30 rounded-full" />
-                  </div>
-                  <p className="text-[10px] font-black uppercase tracking-[0.5em] text-center">Identity Logic Idle</p>
+                <div className="absolute inset-0 flex flex-col items-center justify-center opacity-20 gap-4">
+                  <div className="w-16 h-16 border-2 border-dashed border-gray-600 rounded-full" />
+                  <p className="text-[9px] font-black uppercase tracking-[0.5em]">Waiting for data</p>
                 </div>
               )}
               {isGenerating && (
-                <div className="absolute inset-0 bg-black/95 flex flex-col items-center justify-center gap-6 animate-in fade-in">
-                  <div className="relative">
-                    <div className="w-16 h-16 border-t-2 border-orange-500 rounded-full animate-spin shadow-[0_0_30px_rgba(249,115,22,0.4)]" />
-                    <div className="absolute inset-0 flex items-center justify-center text-[8px] font-black text-orange-500 animate-pulse">AI</div>
-                  </div>
-                  <div className="text-center space-y-1">
-                    <p className="text-[10px] font-mono font-black text-orange-500 uppercase tracking-[0.3em] animate-pulse">Preserving Identity...</p>
-                    <p className="text-[7px] font-mono text-gray-600 uppercase tracking-widest">Reconstructing vanishing points</p>
-                  </div>
+                <div className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center gap-6">
+                  <div className="w-12 h-12 border-t-2 border-orange-500 rounded-full animate-spin" />
+                  <p className="text-[10px] font-mono text-orange-500 animate-pulse uppercase tracking-widest">Applying Identity Lock...</p>
                 </div>
               )}
             </div>
@@ -302,85 +207,28 @@ const App: React.FC = () => {
           <HistorySidebar history={history} onSelect={(i) => {setResult(i); updateCamera(i.cameraState);}} onClear={() => setHistory([])} />
         </aside>
 
-        {/* Dynamic Navigation Switcher - Mobile */}
-        <div className="lg:hidden fixed bottom-8 left-1/2 -translate-x-1/2 flex bg-black/80 backdrop-blur-3xl border border-white/10 rounded-[2rem] p-2 shadow-2xl z-[200]">
+        {/* Mobile Navigation Hub */}
+        <nav className="lg:hidden fixed bottom-6 left-1/2 -translate-x-1/2 bg-black/80 backdrop-blur-3xl border border-white/10 rounded-[2rem] p-2 flex shadow-2xl z-50">
           <button 
             onClick={() => setActiveView('control')}
-            className={`px-8 py-3 rounded-[1.5rem] text-[10px] font-black uppercase tracking-widest transition-all duration-500 ${activeView === 'control' ? 'bg-orange-600 text-white shadow-lg shadow-orange-600/30 scale-105' : 'text-gray-500'}`}
+            className={`px-8 py-3 rounded-full text-[10px] font-black uppercase transition-all ${activeView === 'control' ? 'bg-orange-600 text-white' : 'text-gray-500'}`}
           >
             Stage
           </button>
           <button 
             onClick={() => setActiveView('result')}
-            className={`px-8 py-3 rounded-[1.5rem] text-[10px] font-black uppercase tracking-widest transition-all duration-500 ${activeView === 'result' ? 'bg-orange-600 text-white shadow-lg shadow-orange-600/30 scale-105' : 'text-gray-500'}`}
+            className={`px-8 py-3 rounded-full text-[10px] font-black uppercase transition-all ${activeView === 'result' ? 'bg-orange-600 text-white' : 'text-gray-500'}`}
           >
             Output
           </button>
-        </div>
+        </nav>
       </main>
 
-      {/* Advanced Fullscreen Zoom Overlay */}
-      {isZoomed && result && (
-        <div 
-          className="fixed inset-0 z-[500] bg-black/98 backdrop-blur-3xl flex flex-col items-center justify-center p-6 lg:p-12 animate-in fade-in zoom-in duration-500 overflow-hidden" 
-          onClick={() => setIsZoomed(false)}
-        >
-          <div className="relative max-w-full max-h-full flex flex-col items-center gap-10" onClick={e => e.stopPropagation()}>
-            <div className="relative group/zoom border border-white/5 rounded-[3rem] overflow-hidden shadow-[0_0_120px_rgba(0,0,0,1)]">
-              <img 
-                src={result.imageUrl} 
-                className="max-h-[80vh] w-auto object-contain transition-transform duration-1000 group-hover/zoom:scale-105" 
-                alt="Enlarged Reconstruction" 
-              />
-            </div>
-            
-            <div className="flex flex-wrap justify-center gap-4 animate-in slide-in-from-bottom-5 duration-700">
-              <button 
-                onClick={() => downloadImage(result.imageUrl)}
-                className="bg-white/10 hover:bg-white/20 px-10 py-5 rounded-3xl flex items-center gap-4 font-black text-[11px] uppercase tracking-widest border border-white/10 transition-all active:scale-90 hover:shadow-xl group"
-              >
-                <svg className="group-hover:translate-y-1 transition-transform" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                Export PNG
-              </button>
-              
-              <button 
-                onClick={() => copyImageToClipboard(result.imageUrl)}
-                className="bg-white/10 hover:bg-white/20 px-10 py-5 rounded-3xl flex items-center gap-4 font-black text-[11px] uppercase tracking-widest border border-white/10 transition-all active:scale-90 hover:shadow-xl"
-              >
-                {copyStatus === 'success' ? 'Frame Copied' : 'Copy to Clipboard'}
-              </button>
-
-              <button 
-                onClick={() => shareImage(result.imageUrl)}
-                className="bg-orange-600 hover:bg-orange-500 px-10 py-5 rounded-3xl flex items-center gap-4 font-black text-[11px] uppercase tracking-widest transition-all shadow-2xl shadow-orange-600/40 active:scale-90 group"
-              >
-                <svg className="group-hover:rotate-12 transition-transform" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
-                System Share
-              </button>
-
-              <button 
-                onClick={() => setIsZoomed(false)}
-                className="bg-white/5 hover:bg-white/10 px-10 py-5 rounded-3xl font-black text-[11px] uppercase tracking-widest border border-white/5 transition-colors"
-              >
-                Exit View
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Global Toast Notifications */}
+      {/* Global Toast */}
       {error && (
-        <div className="fixed bottom-28 lg:bottom-12 left-1/2 -translate-x-1/2 z-[600] bg-red-600 text-white px-8 py-5 rounded-3xl font-black text-[11px] tracking-widest shadow-2xl animate-in slide-in-from-bottom-12 duration-500 flex items-center gap-5 border border-white/10">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-red-600 text-white px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-2xl z-[100] animate-in slide-in-from-top-4">
           {error}
-          <button onClick={() => setError(null)} className="opacity-50 hover:opacity-100 transition-opacity">CLOSE</button>
-        </div>
-      )}
-      
-      {copyStatus === 'success' && !isZoomed && (
-        <div className="fixed bottom-28 lg:bottom-12 left-1/2 -translate-x-1/2 z-[600] bg-green-600 text-white px-10 py-5 rounded-3xl font-black text-[11px] tracking-widest shadow-2xl animate-in slide-in-from-bottom-12 duration-500 border border-white/10">
-          Frame processed successfully!
+          <button onClick={() => setError(null)} className="ml-4 opacity-50">Dismiss</button>
         </div>
       )}
     </div>

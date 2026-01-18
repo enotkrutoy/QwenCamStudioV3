@@ -20,36 +20,38 @@ export class GeminiService {
     };
 
     const textPart = {
-      text: `[SYSTEM_KERNEL: IDENTITY_PRESERVATION_ENGINE_V6]
-Strict operational guidelines for high-fidelity spatial reconstruction.
+      text: `## ИНСТРУКЦИЯ ДЛЯ МОДЕЛИ (IDENTITY PRESERVATION ENGINE V8) ##
 
-PHASE 0: NEUTRAL_VISUAL_REGISTRATION
-Analyze the source image with zero bias. Register the primary subject's anatomical structure.
-- Generate a latent anchor of the subject's identity.
-- Do not modify age, ethnicity, or core character traits.
+ФАЗА 1: ГЛУБОКИЙ СТРУКТУРНЫЙ АНАЛИЗ
+Проанализируй изображение и зафиксируй ВСЕ элементы сцены:
+- СУБЪЕКТ: черты лица, пропорции, одежда.
+- ВЗАИМОДЕЙСТВИЕ: зафиксируй любые предметы в руках (документы, карты, гаджеты). Это КРИТИЧЕСКИЕ элементы сцены.
+- ОКРУЖЕНИЕ: фон, освещение, тени.
+*ЗАПРЕТ:* Не игнорировать и не удалять мелкие объекты. Если человек держит документ — этот документ является частью его идентичности в данной сцене.
 
-PHASE 1: IDENTITY_LOCK (CRITICAL)
-- Lock biometric parameters: pupillary distance, bone structure, nasal architecture, hairline.
-- PROHIBITED: "Enhancement", retouching, or facial modifications. 
-- Transfer 100% of skin texture, moles, and micro-details to the reconstructed frame.
+ФАЗА 2: РЕКОНСТРУКЦИЯ С СОХРАНЕНИЕМ ЦЕЛОСТНОСТИ
+Выполни трансформацию ракурса: "${cameraPrompt}".
 
-PHASE 2: SPATIAL_TRANSFORMATION
-- Execute 3D perspective shift: ${cameraPrompt}
-- Scene context: ${settings.creativeContext || "Maintain original lighting and environment materials"}
+ПРОТОКОЛ SCENE_INTEGRITY_LOCK:
+1. СОХРАНЕНИЕ ОБЪЕКТОВ: Все предметы, которые субъект держит в руках (карточки, документы, аксессуары), ДОЛЖНЫ остаться в кадре и быть четко прорисованы. Удаление или обрезание этих объектов считается критической ошибкой рендеринга.
+2. БЕЗ КРОПА: Не изменять границы кадра так, чтобы важные детали (руки с предметами) оказались за пределами видимости.
+3. ИДЕНТИЧНОСТЬ: Лицо, волосы, возраст и внешность должны соответствовать оригиналу на 100%.
+4. ТЕХНИЧЕСКАЯ ЧИСТОТА: Убрать шумы и пиксели, но сохранить текст или структуру на предметах в руках (сделать их более читаемыми, но не менять их содержание).
 
-CONSTRAINTS:
-- PERSPECTIVE: Recalculate all vanishing points relative to NEW camera position.
-- FIDELITY: Maintain consistent lighting on the subject's face during rotation.
-- SEED: ${settings.seed}
-- OUTPUT: One high-resolution cinematic reconstruction.`
+Цель: Получить технически совершенную версию оригинала в новом ракурсе, ГДЕ ВСЕ ЭЛЕМЕНТЫ (включая документы в руках) СОХРАНЕНЫ И УЛУЧШЕНЫ.
+
+КОНТЕКСТ: ${settings.creativeContext || "Максимальная реалистичность."}
+SEED: ${settings.seed}`
     };
 
     const config: any = {
-      imageConfig: { aspectRatio: "1:1" }
+      imageConfig: { 
+        aspectRatio: "1:1",
+        imageSize: settings.quality === 'pro' ? (settings.imageSize || '1K') : undefined
+      }
     };
 
     if (settings.quality === 'pro') {
-      config.imageConfig.imageSize = settings.imageSize || '1K';
       config.tools = [{ googleSearch: {} }];
     }
 
@@ -72,11 +74,13 @@ CONSTRAINTS:
     }
 
     if (!imageUrl) {
-      throw new Error("RECONSTRUCTION_FAULT: Identity lock failed. Try a different source.");
+      throw new Error("ОШИБКА_V8: Нарушена целостность сцены. ИИ попытался удалить ключевой объект.");
     }
 
-    const groundingChunks = candidate?.groundingMetadata?.groundingChunks as GroundingChunk[];
-    return { imageUrl, groundingChunks };
+    return { 
+      imageUrl, 
+      groundingChunks: candidate?.groundingMetadata?.groundingChunks as GroundingChunk[] 
+    };
   }
 }
 
