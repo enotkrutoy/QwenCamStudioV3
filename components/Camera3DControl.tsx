@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef, useMemo } from 'react';
 import * as THREE from 'three';
 import { CameraControlState, ImageData, CameraPreset } from '../types';
@@ -18,7 +17,6 @@ export const Camera3DControl: React.FC<Props> = ({ state, sourceImage, onChange,
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const modelCameraRef = useRef<THREE.Group | null>(null);
   const photoPlaneRef = useRef<THREE.Mesh | null>(null);
-  const frustumRef = useRef<THREE.LineSegments | null>(null);
   const keyLightRef = useRef<THREE.PointLight | null>(null);
 
   const stateRef = useRef(state);
